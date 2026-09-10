@@ -1,0 +1,94 @@
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.api
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgres://fileconvert:fileconvert@postgres:5432/fileconvert?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - STORAGE_PATH=/data/storage
+    volumes:
+      - ../../storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.worker
+    environment:
+      - DATABASE_URL=postgres://fileconvert:fileconvert@postgres:5432/fileconvert?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - STORAGE_PATH=/data/storage
+    volumes:
+      - ../../storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: 2
+    healthcheck:
+      test: ["CMD-SHELL", "ffmpeg -version || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=fileconvert
+      - POSTGRES_PASSWORD=fileconvert
+      - POSTGRES_DB=fileconvert
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fileconvert -d fileconvert"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../../nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot-data:/etc/letsencrypt
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  postgres-data:
+  certbot-data:

@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'FileConvert Dashboards'
+    orgId: 1
+    folder: 'FileConvert'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

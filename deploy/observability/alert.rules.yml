@@ -1,0 +1,48 @@
+groups:
+  - name: fileconvert_alerts
+    rules:
+      - alert: HighFormatPairFailureRate
+        expr: |
+          (
+            sum(rate(fileconvert_conversions_total{status="failed"}[5m])) by (source_format, target_format)
+            /
+            sum(rate(fileconvert_conversions_total[5m])) by (source_format, target_format)
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Taxa de falha elevada para conversão {{ $labels.source_format }} -> {{ $labels.target_format }}"
+          description: "A taxa de erros para o par de formatos {{ $labels.source_format }} -> {{ $labels.target_format }} ultrapassou 5% nos últimos 5 minutos."
+
+      - alert: QueueStagnantOrGrowing
+        expr: fileconvert_queue_depth > 50 and rate(fileconvert_conversions_total[3m]) == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fila de conversão represada sem consumo por workers"
+          description: "A fila de jobs pendentes possui mais de 50 itens e a taxa de conclusões foi 0 nos últimos 3 minutos."
+
+      - alert: RecurringJobTimeouts
+        expr: increase(fileconvert_conversions_total{status="failed", error_code="JOB_TIMEOUT"}[10m]) >= 3
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Estouro recorrente de SLA de conversão (Timeouts > 60s)"
+          description: "Ocorreram {{ $value }} falhas por timeout de 60s nos últimos 10 minutos."
+
+      - alert: HighEdgeRejectionRate
+        expr: |
+          (
+            sum(rate(fileconvert_edge_requests_total{status_code=~"4..|5.."}[5m]))
+            /
+            sum(rate(fileconvert_edge_requests_total[5m]))
+          ) > 0.20
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pico de rejeição de requisições HTTP na borda da API"
+          description: "Mais de 20% das requisições de entrada foram rejeitadas síncronamente nos últimos 5 minutos."
