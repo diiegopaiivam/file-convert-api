@@ -1,0 +1,50 @@
+name: CD / Deploy to Oracle Cloud VM
+
+on:
+  workflow_run:
+    workflows: ["Build and Push Docker Images"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Production VM via SSH
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'))
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Mask Sensitive Deployment Inputs
+        run: |
+          echo "::add-mask::${{ secrets.OCI_VM_HOST }}"
+          echo "::add-mask::${{ secrets.OCI_VM_USER }}"
+
+      - name: Execute Deployment Commands via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.OCI_VM_HOST }}
+          username: ${{ secrets.OCI_VM_USER }}
+          key: ${{ secrets.OCI_VM_SSH_KEY }}
+          port: 22
+          script: |
+            set -e
+            echo "==> Navegando para o diretório de deploy..."
+            if [ -d "$HOME/file-convert-api/deploy" ]; then
+              cd "$HOME/file-convert-api/deploy"
+            elif [ -d "/home/${{ secrets.OCI_VM_USER }}/file-convert-api/deploy" ]; then
+              cd "/home/${{ secrets.OCI_VM_USER }}/file-convert-api/deploy"
+            else
+              echo "Erro: Diretório de deploy não encontrado!"
+              exit 1
+            fi
+
+            echo "==> Atualizando imagens via Docker Compose..."
+            docker compose pull
+
+            echo "==> Reiniciando serviços..."
+            docker compose up -d --remove-orphans
+
+            echo "==> Realizando purga de recursos não utilizados..."
+            docker system prune -f
+
+            echo "==> Deployment concluído com sucesso!"

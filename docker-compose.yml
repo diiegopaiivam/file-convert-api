@@ -39,6 +39,13 @@ services:
       - STORAGE_PATH=/data/storage
     volumes:
       - ./storage:/data/storage
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       postgres:
         condition: service_healthy

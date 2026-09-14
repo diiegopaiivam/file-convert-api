@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/file-convert-api/internal/adapters/converter/audio"
+	"github.com/file-convert-api/internal/adapters/converter/document"
+	"github.com/file-convert-api/internal/adapters/converter/image"
 	"github.com/file-convert-api/internal/adapters/observability"
 	"github.com/file-convert-api/internal/adapters/queue"
 	"github.com/file-convert-api/internal/adapters/repository"
@@ -50,11 +52,27 @@ func main() {
 		queueAdapter = queue.NewChannelJobQueue(500).WithMetrics(metrics)
 	}
 
-	// Configurar Registro de Conversores
+	// Configurar Registro de Conversores (Áudio, Documentos e Imagem/PDF)
 	registry := usecase.NewDefaultConverterRegistry()
+
 	ffmpegConverter := audio.NewFFmpegAudioConverter("")
 	if err := registry.Register(ffmpegConverter); err != nil {
 		log.Fatalf("Falha ao registrar conversor de áudio FFmpeg: %v", err)
+	}
+
+	libreofficeConverter := document.NewLibreOfficeDocConverter("")
+	if err := registry.Register(libreofficeConverter); err != nil {
+		log.Fatalf("Falha ao registrar conversor de documentos LibreOffice: %v", err)
+	}
+
+	imageToPDFConverter := image.NewImageToPDFConverter("")
+	if err := registry.Register(imageToPDFConverter); err != nil {
+		log.Fatalf("Falha ao registrar conversor ImageToPDF: %v", err)
+	}
+
+	pdfToImageConverter := image.NewPDFToImageConverter("")
+	if err := registry.Register(pdfToImageConverter); err != nil {
+		log.Fatalf("Falha ao registrar conversor PDFToImage: %v", err)
 	}
 
 	processJobUseCase := usecase.NewProcessJobUseCase(repoAdapter, storageAdapter, registry).

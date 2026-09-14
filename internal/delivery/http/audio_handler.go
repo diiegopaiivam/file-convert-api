@@ -13,7 +13,7 @@ import (
 	"github.com/file-convert-api/internal/ports"
 )
 
-const MaxUploadSize = 50 * 1024 * 1024 // 50 MB
+const MaxUploadSize = 50 * 1024 * 1024 // 50 MB (52.428.800 bytes) conforme RNF 4.1 e ADR 0006
 
 type AudioHandler struct {
 	repo    ports.JobRepository
@@ -47,6 +47,31 @@ func (h *AudioHandler) WithMetrics(metrics ports.MetricsRecorder) *AudioHandler 
 	return h
 }
 
+type ConversionJobResponse struct {
+	JobID        string           `json:"job_id" example:"job_a1b2c3d4"`
+	SourceFormat domain.Format    `json:"source_format" example:"wav"`
+	TargetFormat domain.Format    `json:"target_format" example:"mp3"`
+	Status       domain.JobStatus `json:"status" example:"pending"`
+	CreatedAt    string           `json:"created_at" example:"2026-09-14T15:00:00Z"`
+}
+
+// @Summary Criar job de conversão de áudio
+// @Description Recebe um arquivo de áudio (.wav ou .mp3) até 50 MB e enfileira um job de conversão assíncrona.
+// @Tags Conversions
+// @Accept multipart/form-data
+// @Produce json
+// @Param file formData file true "Arquivo de áudio de entrada (.wav ou .mp3, máx 50 MB)"
+// @Param target_format formData string true "Formato de destino desejado ('mp3' ou 'wav')"
+// @Success 202 {object} ConversionJobResponse "Job criado e enfileirado com sucesso (status: pending)"
+// @Failure 400 {object} domain.APIErrorResponse "Arquivo vazio ou parâmetros inválidos"
+// @Failure 401 {object} domain.APIErrorResponse "Autenticação necessária / Chave de API inválida"
+// @Failure 413 {object} domain.APIErrorResponse "Arquivo enviado excede o limite de 50 MB"
+// @Failure 415 {object} domain.APIErrorResponse "Par de formatos de conversão não suportado"
+// @Failure 429 {object} domain.APIErrorResponse "Limite de requisições por segundo ou quota de jobs simultâneos excedida"
+// @Failure 500 {object} domain.APIErrorResponse "Erro interno do servidor"
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/conversions/audio [post]
 func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusMethodNotAllowed, domain.ErrCodeInternalError)
@@ -54,10 +79,17 @@ func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Limitar tamanho do corpo da requisição a 50 MB
+	// 1. Validar Content-Length antecipadamente antes de processar qualquer payload
+	if r.ContentLength > MaxUploadSize {
+		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge)
+		renderError(w, http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge, "O arquivo enviado excede o limite máximo permitido de 50 MB.", nil)
+		return
+	}
+
+	// 2. Limitar o tamanho do corpo da requisição usando MaxBytesReader para estancar uploads em streaming
 	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadSize)
 	if err := r.ParseMultipartForm(MaxUploadSize); err != nil {
-		if strings.Contains(err.Error(), "too large") {
+		if strings.Contains(err.Error(), "too large") || strings.Contains(err.Error(), "request body too large") {
 			h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge)
 			renderError(w, http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge, "O arquivo enviado excede o limite máximo permitido de 50 MB.", nil)
 			return
@@ -83,11 +115,12 @@ func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
 
 	if header.Size > MaxUploadSize {
 		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge)
-		renderError(w, http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge, "O arquivo enviado excede o limite de 50 MB.", nil)
+		renderError(w, http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge, "O arquivo enviado excede o limite máximo permitido de 50 MB.", nil)
 		return
 	}
 
 	targetFormatStr := strings.ToLower(strings.TrimSpace(r.FormValue("target_format")))
+	targetFormatStr = strings.Trim(targetFormatStr, "\"'")
 	if targetFormatStr == "" {
 		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusBadRequest, domain.ErrCodeUnsupportedFormat)
 		renderError(w, http.StatusBadRequest, domain.ErrCodeUnsupportedFormat, "O parâmetro 'target_format' é obrigatório.", nil)
@@ -98,12 +131,9 @@ func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
 	sourceFormat := domain.Format(ext)
 	targetFormat := domain.Format(targetFormatStr)
 
-	// Validar que é um par de conversão de áudio suportado (.wav ↔ .mp3)
-	isValidPair := (sourceFormat == domain.FormatWAV && targetFormat == domain.FormatMP3) ||
-		(sourceFormat == domain.FormatMP3 && targetFormat == domain.FormatWAV)
-
-	if !isValidPair {
-		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusUnsupportedMediaType, domain.ErrCodeUnsupportedFormat)
+	// Validar se é um par de conversão suportado no domínio
+	if !domain.IsValidConversionPair(sourceFormat, targetFormat) {
+		h.metrics.RecordEdgeRequest(r.Context(), r.Method, r.URL.Path, http.StatusUnsupportedMediaType, domain.ErrCodeUnsupportedFormat)
 		renderError(w, http.StatusUnsupportedMediaType, domain.ErrCodeUnsupportedFormat,
 			fmt.Sprintf("Conversão de '%s' para '%s' não é suportada na v1.", sourceFormat, targetFormat), nil)
 		return
@@ -115,7 +145,7 @@ func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
 	sourceKey := fmt.Sprintf("sources/%s.%s", jobID, sourceFormat)
 
 	// Upload do arquivo para o ObjectStorage (usando metadados sanitizados)
-	contentType := "audio/" + string(sourceFormat)
+	contentType := getContentType(sourceFormat)
 	if err := h.storage.Upload(ctx, sourceKey, file, header.Size, contentType); err != nil {
 		h.logger.Error(ctx, "Falha ao armazenar arquivo recebido no storage", ports.Field{Key: "error", Value: err.Error()})
 		h.metrics.RecordEdgeRequest(ctx, r.Method, "/v1/conversions/audio", http.StatusInternalServerError, domain.ErrCodeInternalError)

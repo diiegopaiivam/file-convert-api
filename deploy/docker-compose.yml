@@ -27,6 +27,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+        compress: "true"
     restart: unless-stopped
 
   worker:
@@ -39,6 +40,13 @@ services:
       - STORAGE_PATH=/data/storage
     volumes:
       - ../storage:/data/storage
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,6 +65,26 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+        compress: "true"
+    restart: unless-stopped
+
+  storage-cleanup:
+    image: alpine:3.19
+    container_name: fileconvert-storage-cleanup
+    volumes:
+      - ../storage:/data/storage:rw
+    command: >
+      sh -c "
+      echo 'Iniciando servico de limpeza de storage com rotina cron (a cada 1 hora)...';
+      echo '0 * * * * find /data/storage -type f -mmin +1440 -delete' > /etc/crontabs/root &&
+      crond -f -l 2
+      "
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
     restart: unless-stopped
 
   prometheus:
@@ -71,8 +99,8 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=15d'
-      - '--storage.tsdb.retention.size=10GB'
+      - '--storage.tsdb.retention.time=7d'
+      - '--storage.tsdb.retention.size=5GB'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
     logging:
@@ -80,6 +108,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+        compress: "true"
     restart: unless-stopped
 
   grafana:
@@ -103,6 +132,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+        compress: "true"
     restart: unless-stopped
 
   redis:
@@ -119,6 +149,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+        compress: "true"
     restart: unless-stopped
 
   postgres:
@@ -139,6 +170,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+        compress: "true"
     restart: unless-stopped
 
   nginx:
@@ -157,6 +189,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+        compress: "true"
     restart: unless-stopped
 
 volumes:

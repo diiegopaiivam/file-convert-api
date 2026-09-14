@@ -44,6 +44,30 @@ func (h *JobHandler) HandleJob(w http.ResponseWriter, r *http.Request) {
 	h.GetJobStatus(w, r, jobID)
 }
 
+type JobStatusResponse struct {
+	JobID        string           `json:"job_id" example:"job_a1b2c3d4"`
+	SourceFormat domain.Format    `json:"source_format" example:"wav"`
+	TargetFormat domain.Format    `json:"target_format" example:"mp3"`
+	Status       domain.JobStatus `json:"status" example:"done"`
+	DownloadURL  string           `json:"download_url,omitempty" example:"/v1/jobs/job_a1b2c3d4/download"`
+	Error        *domain.JobError `json:"error,omitempty"`
+	CreatedAt    string           `json:"created_at" example:"2026-09-14T15:00:00Z"`
+	UpdatedAt    string           `json:"updated_at" example:"2026-09-14T15:00:10Z"`
+}
+
+// @Summary Consultar status do job
+// @Description Retorna o estado atual do job de conversão e o URL de download caso concluído com sucesso.
+// @Tags Jobs
+// @Produce json
+// @Param job_id path string true "ID único do job"
+// @Success 200 {object} JobStatusResponse "Status e detalhes do job"
+// @Failure 401 {object} domain.APIErrorResponse "Autenticação necessária / Chave de API inválida"
+// @Failure 404 {object} domain.APIErrorResponse "Job não encontrado"
+// @Failure 429 {object} domain.APIErrorResponse "Limite de requisições excedido"
+// @Failure 500 {object} domain.APIErrorResponse "Erro interno do servidor"
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/jobs/{job_id} [get]
 func (h *JobHandler) GetJobStatus(w http.ResponseWriter, r *http.Request, jobID string) {
 	if r.Method != http.MethodGet {
 		renderError(w, http.StatusMethodNotAllowed, domain.ErrCodeInternalError, "Método HTTP não permitido", nil)
@@ -82,6 +106,20 @@ func (h *JobHandler) GetJobStatus(w http.ResponseWriter, r *http.Request, jobID 
 	renderJSON(w, http.StatusOK, response)
 }
 
+// @Summary Baixar resultado da conversão
+// @Description Realiza o download do arquivo binário gerado pela conversão concluída.
+// @Tags Jobs
+// @Produce octet-stream,audio/mpeg,audio/wav,application/pdf,image/jpeg,image/png
+// @Param job_id path string true "ID único do job"
+// @Success 200 {file} binary "Arquivo binário convertido"
+// @Failure 400 {object} domain.APIErrorResponse "Job ainda não concluído ou sem arquivo gerado"
+// @Failure 401 {object} domain.APIErrorResponse "Autenticação necessária / Chave de API inválida"
+// @Failure 404 {object} domain.APIErrorResponse "Job ou arquivo não encontrado no storage (expirado após 24h)"
+// @Failure 429 {object} domain.APIErrorResponse "Limite de requisições excedido"
+// @Failure 500 {object} domain.APIErrorResponse "Erro interno do servidor"
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/jobs/{job_id}/download [get]
 func (h *JobHandler) DownloadJobResult(w http.ResponseWriter, r *http.Request, jobID string) {
 	if r.Method != http.MethodGet {
 		renderError(w, http.StatusMethodNotAllowed, domain.ErrCodeInternalError, "Método HTTP não permitido", nil)

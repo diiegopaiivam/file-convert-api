@@ -15,6 +15,26 @@ import (
 	"github.com/file-convert-api/internal/ports"
 )
 
+// @title FileConvert API
+// @version 1.0
+// @description API de conversão assíncrona de arquivos de alto desempenho (Hexagonal Architecture).
+// @contact.name Suporte FileConvert API
+// @contact.email security@fileconvert.example.com
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+// @host localhost:8080
+// @BasePath /
+
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name X-API-Key
+// @description Autenticação via cabeçalho X-API-Key
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Autenticação via cabeçalho Authorization: Bearer <api_key>
+
 func main() {
 	// Inicialização dos adaptadores de Observabilidade
 	logger := observability.NewJSONLogger()

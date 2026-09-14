@@ -53,6 +53,29 @@ func (uc *ProcessJobUseCase) WithMetrics(metrics ports.MetricsRecorder) *Process
 	return uc
 }
 
+// GetTimeoutForFamily calcula o tempo limite específico da família de conversão conforme ADR 0006.
+func GetTimeoutForFamily(sourceFormat, targetFormat domain.Format) time.Duration {
+	// Família 1: Áudio (.wav ↔ .mp3) -> 30 segundos
+	if (sourceFormat == domain.FormatWAV && targetFormat == domain.FormatMP3) ||
+		(sourceFormat == domain.FormatMP3 && targetFormat == domain.FormatWAV) {
+		return 30 * time.Second
+	}
+
+	// Família 2: Imagem & PDF (.jpg/.png ↔ .pdf) -> 45 segundos
+	if ((sourceFormat == domain.FormatJPG || sourceFormat == domain.FormatPNG) && targetFormat == domain.FormatPDF) ||
+		(sourceFormat == domain.FormatPDF && targetFormat == domain.FormatJPG) {
+		return 45 * time.Second
+	}
+
+	// Família 3: Documento para PDF (.doc/.docx → .pdf) -> 60 segundos
+	if (sourceFormat == domain.FormatDOC || sourceFormat == domain.FormatDOCX) && targetFormat == domain.FormatPDF {
+		return 60 * time.Second
+	}
+
+	// Teto máximo do SLA global
+	return 60 * time.Second
+}
+
 // Execute executa o processamento completo de um job a partir do seu ID.
 func (uc *ProcessJobUseCase) Execute(ctx context.Context, jobID string) error {
 	ctx = ports.WithJobID(ctx, jobID)
@@ -80,22 +103,40 @@ func (uc *ProcessJobUseCase) Execute(ctx context.Context, jobID string) error {
 		ports.Field{Key: "target_format", Value: job.TargetFormat},
 	)
 
-	// 3. Obter o conversor no registry
+	// 3. Validar que o par de formatos pertence à Whitelist Fechada da v1
+	if !domain.IsValidConversionPair(job.SourceFormat, job.TargetFormat) {
+		return uc.failJob(ctx, job, domain.ErrCodeUnsupportedFormat, "Par de formatos de conversão não suportado na v1", domain.ErrUnsupportedFormat)
+	}
+
+	// 4. Obter o conversor no registry
 	converter, err := uc.registry.GetConverter(job.SourceFormat, job.TargetFormat)
 	if err != nil {
 		return uc.failJob(ctx, job, domain.ErrCodeUnsupportedFormat, "Formato de arquivo não suportado", err)
 	}
 
-	// 4. Baixar o arquivo de origem do ObjectStorage
-	srcStream, err := uc.storage.Download(ctx, job.SourceObjectKey)
+	// 5. Baixar o arquivo de origem do ObjectStorage
+	rawSrcStream, err := uc.storage.Download(ctx, job.SourceObjectKey)
 	if err != nil {
 		return uc.failJob(ctx, job, domain.ErrCodeInternalError, "Falha ao recuperar arquivo original do storage", err)
 	}
-	defer srcStream.Close()
+	defer rawSrcStream.Close()
 
-	// 5. Executar a conversão através do Converter
+	// 6. Validar os Magic Bytes reais do arquivo (inspeção de cabeçalho binário)
+	srcStream, err := domain.ValidateMagicBytes(rawSrcStream, job.SourceFormat)
+	if err != nil {
+		if errors.Is(err, domain.ErrEmptyFile) {
+			return uc.failJob(ctx, job, domain.ErrCodeEmptyFile, "O arquivo enviado está vazio.", err)
+		}
+		return uc.failJob(ctx, job, domain.ErrCodeCorruptedFile, "O cabeçalho do arquivo enviado é inválido ou corrompido para o formato declarado.", err)
+	}
+
+	// 7. Determinar timeout da família de conversão e criar contexto isolado com cancelamento forçado do subprocesso
+	familyTimeout := GetTimeoutForFamily(job.SourceFormat, job.TargetFormat)
+	conversionCtx, cancel := context.WithTimeout(ctx, familyTimeout)
+	defer cancel()
+
 	startTime := time.Now()
-	convertedStream, err := converter.Convert(ctx, srcStream, job.SourceFormat, job.TargetFormat)
+	convertedStream, err := converter.Convert(conversionCtx, srcStream, job.SourceFormat, job.TargetFormat)
 	duration := time.Since(startTime)
 
 	uc.metrics.RecordConversionDuration(ctx, job.SourceFormat, job.TargetFormat, duration)
@@ -104,8 +145,8 @@ func (uc *ProcessJobUseCase) Execute(ctx context.Context, jobID string) error {
 		if errors.Is(err, domain.ErrCorruptedFile) {
 			return uc.failJob(ctx, job, domain.ErrCodeCorruptedFile, "O arquivo enviado está corrompido e não pôde ser processado.", err)
 		}
-		if errors.Is(err, domain.ErrJobTimeout) {
-			return uc.failJob(ctx, job, domain.ErrCodeJobTimeout, "O tempo limite de processamento de 60 segundos foi excedido.", err)
+		if errors.Is(err, domain.ErrJobTimeout) || errors.Is(conversionCtx.Err(), context.DeadlineExceeded) {
+			return uc.failJob(ctx, job, domain.ErrCodeJobTimeout, fmt.Sprintf("O tempo limite de processamento de %v foi excedido.", familyTimeout), domain.ErrJobTimeout)
 		}
 		if errors.Is(err, domain.ErrEmptyFile) {
 			return uc.failJob(ctx, job, domain.ErrCodeEmptyFile, "O arquivo enviado está vazio.", err)
@@ -122,7 +163,7 @@ func (uc *ProcessJobUseCase) Execute(ctx context.Context, jobID string) error {
 		return uc.failJob(ctx, job, domain.ErrCodeInternalError, "Falha ao ler o resultado da conversão", err)
 	}
 
-	// 6. Upload do arquivo convertido para o ObjectStorage
+	// 8. Upload do arquivo convertido para o ObjectStorage
 	targetKey := fmt.Sprintf("converted/%s.%s", job.ID, job.TargetFormat)
 	contentType := getContentType(job.TargetFormat)
 
@@ -131,7 +172,7 @@ func (uc *ProcessJobUseCase) Execute(ctx context.Context, jobID string) error {
 		return uc.failJob(ctx, job, domain.ErrCodeInternalError, "Falha ao armazenar arquivo convertido no storage", err)
 	}
 
-	// 7. Atualizar status final para 'done'
+	// 9. Atualizar status final para 'done'
 	if err := uc.jobRepo.UpdateStatus(ctx, job.ID, domain.StatusDone, targetKey, nil); err != nil {
 		uc.logger.Error(ctx, "Falha ao atualizar status do job para done", ports.Field{Key: "error", Value: err.Error()})
 		return fmt.Errorf("falha ao atualizar status para done: %w", err)

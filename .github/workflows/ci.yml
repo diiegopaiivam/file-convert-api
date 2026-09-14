@@ -1,0 +1,39 @@
+name: CI / Fast Feedback
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  fast-feedback:
+    name: Lint, Vet, Unit Tests & Sanity Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          check-latest: true
+          cache: true
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: v1.56.2
+
+      - name: Run Unit Tests with Race Detector
+        run: go test -v -race ./...
+
+      - name: Sanity Build API Binary
+        run: go build -v -o /dev/null ./cmd/api
+
+      - name: Sanity Build Worker Binary
+        run: go build -v -o /dev/null ./cmd/worker

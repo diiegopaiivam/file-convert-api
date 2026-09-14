@@ -7,8 +7,9 @@ import (
 type contextKey string
 
 const (
-	JobIDContextKey         contextKey = "job_id"
-	CorrelationIDContextKey contextKey = "correlation_id"
+	JobIDContextKey          contextKey = "job_id"
+	CorrelationIDContextKey  contextKey = "correlation_id"
+	ClientIdentityContextKey contextKey = "client_identity"
 )
 
 // WithJobID injeta o job_id no contexto de execução.
@@ -43,4 +44,21 @@ func CorrelationIDFromContext(ctx context.Context) (string, bool) {
 	}
 	id, ok := ctx.Value(CorrelationIDContextKey).(string)
 	return id, ok
+}
+
+// WithClientIdentity injeta a ClientIdentity no contexto de execução.
+func WithClientIdentity(ctx context.Context, client *ClientIdentity) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, ClientIdentityContextKey, client)
+}
+
+// ClientIdentityFromContext recupera a ClientIdentity do contexto de execução, se presente.
+func ClientIdentityFromContext(ctx context.Context) (*ClientIdentity, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	client, ok := ctx.Value(ClientIdentityContextKey).(*ClientIdentity)
+	return client, ok
 }

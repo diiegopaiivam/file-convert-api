@@ -114,8 +114,12 @@ type ErrorDetail struct {
 | :--- | :--- | :--- | :--- |
 | `400 Bad Request` | `EMPTY_FILE` | Arquivo enviado possui 0 bytes. | Síncrono (Upload) |
 | `400 Bad Request` | `INVALID_INPUT` | Parâmetros de requisição malformados. | Síncrono (Upload) |
+| `401 Unauthorized` | `UNAUTHORIZED` | API key ausente, malformada ou inválida. | Síncrono (Auth) |
+| `403 Forbidden` | `FORBIDDEN` | API key sem permissão para acessar o recurso. | Síncrono (Auth) |
 | `413 Payload Too Large` | `FILE_TOO_LARGE` | Arquivo excede o limite de 50 MB. | Síncrono (Upload) |
 | `415 Unsupported Media Type` | `UNSUPPORTED_FORMAT` | Formato de origem/destino não suportado no escopo v1. | Síncrono (Upload) |
+| `429 Too Many Requests` | `RATE_LIMIT_EXCEEDED` | Limite de requisições por segundo/minuto excedido (rejeição com `Retry-After`). | Síncrono (RateLimit) |
+| `429 Too Many Requests` | `CONCURRENT_JOBS_EXCEEDED` | Quota de jobs simultâneos em processamento atingida (rejeição com `Retry-After`). | Síncrono (RateLimit) |
 | N/A (`status: failed`) | `CORRUPTED_FILE` | Falha na leitura/decodificação do binário pelo worker. | Assíncrono (Worker) |
 | N/A (`status: failed`) | `JOB_TIMEOUT` | Processamento excedeu o limite máximo de 60 segundos. | Assíncrono (Worker) |
 | `500 Internal Error` | `INTERNAL_ERROR` | Falha inesperada de infraestrutura. | Síncrono / Assíncrono |
@@ -194,16 +198,24 @@ type JobRepository interface {
 Port para armazenamento de objetos (arquivos originais enviados e arquivos convertidos gerados).
 
 ```go
-// ObjectStorage abstrai o armazenamento de arquivos binários.
+// ObjectStorage abstrai o armazenamento de arquivos binários e gerenciamento de tempo de vida.
 type ObjectStorage interface {
-	// Upload armazena um arquivo e retorna a chave única do objeto armazenado.
+	// Upload armazena um arquivo no storage.
 	Upload(ctx context.Context, key string, content io.Reader, size int64, contentType string) error
+
+	// UploadWithTTL armazena um arquivo atribuindo um tempo de retenção/expiração pré-definido (TTL).
+	UploadWithTTL(ctx context.Context, key string, content io.Reader, size int64, contentType string, ttl time.Duration) error
 
 	// Download recupera o stream de leitura de um arquivo armazenado.
 	Download(ctx context.Context, key string) (io.ReadCloser, error)
 
 	// Delete remove um objeto do storage.
 	Delete(ctx context.Context, key string) error
+
+	// DeleteExpired varre e remove objetos cuja retenção excedeu a janela estipulada.
+	// Em adaptadores S3/MinIO com regras de Lifecycle ativas, este método atua como fallback/purga manual.
+	// Em adaptadores de sistema de arquivos local, realiza a limpeza dos arquivos expirados em disco.
+	DeleteExpired(ctx context.Context, retentionWindow time.Duration) (int64, error)
 }
 ```
 
@@ -237,6 +249,8 @@ type Field struct {
 }
 
 // Logger define o contrato para emissores de logs estruturados.
+// Regra Estrita de Privacidade: Nenhum log pode registrar conteúdo de arquivo ou PII (ex.: nome de arquivo fornecido pelo cliente).
+// Apenas metadados sanitizados (ex.: job_id, source_format, target_format, file_size_bytes, duration_ms) são permitidos.
 type Logger interface {
 	Debug(ctx context.Context, msg string, fields ...Field)
 	Info(ctx context.Context, msg string, fields ...Field)
@@ -324,6 +338,92 @@ func JobIDFromContext(ctx context.Context) (string, bool) {
 }
 ```
 
+---
+
+### 3.10. `AuthProvider` Port
+Port para autenticação e validação de chaves de API (`API Keys`).
+
+```go
+// ClientTierLimits define as quotas de uso associadas ao plano do cliente.
+type ClientTierLimits struct {
+	RateLimitRPS      int `json:"rate_limit_rps"`       // Requisições por segundo permitidas
+	RateLimitRPM      int `json:"rate_limit_rpm"`       // Requisições por minuto permitidas
+	MaxConcurrentJobs int `json:"max_concurrent_jobs"` // Quota máxima de jobs simultâneos ativas
+}
+
+// ClientIdentity representa os atributos da entidade autenticada.
+type ClientIdentity struct {
+	ID         string           `json:"client_id"`
+	APIKey     string           `json:"api_key"`
+	Plan       string           `json:"plan"` // e.g., "free", "pro", "enterprise"
+	TierLimits ClientTierLimits `json:"tier_limits"`
+}
+
+// AuthProvider define o contrato para autenticação e validação de chaves de API na borda HTTP.
+type AuthProvider interface {
+	// Authenticate valida a chave de API fornecida (via header Authorization: Bearer ou X-API-Key).
+	// Retorna domain.ErrUnauthorized caso a chave seja inválida, revogada ou expirada.
+	Authenticate(ctx context.Context, apiKey string) (*ClientIdentity, error)
+}
+```
+
+---
+
+### 3.11. `RateLimiter` Port
+Port para controle de vazão por chave de API/IP e limitação de jobs simultâneos em processamento.
+
+```go
+// RateLimitResult especifica o estado atual de consumo de limites de requisição ou concorrência.
+type RateLimitResult struct {
+	Allowed           bool          `json:"allowed"`
+	Limit             int           `json:"limit"`
+	Remaining         int           `json:"remaining"`
+	ResetDuration     time.Duration `json:"reset_duration"`      // Duração da janela até o reset
+	RetryAfterSeconds int           `json:"retry_after_seconds"` // Valor numérico para o cabeçalho HTTP Retry-After
+	Reason            string        `json:"reason,omitempty"`    // "rate_limit_exceeded" ou "concurrent_jobs_exceeded"
+}
+
+// RateLimiter abstrai os algoritmos de controle de vazão (Leaky Bucket / Token Bucket) e semáforo distribuído.
+type RateLimiter interface {
+	// AllowKey verifica se a chave de API respeita o limite de taxa de requisições configurado (RPS/RPM).
+	AllowKey(ctx context.Context, apiKey string, limitRPS int) (*RateLimitResult, error)
+
+	// AllowIP verifica se o endereço IP do cliente respeita o limite de requisições de borda (ex.: proteção DoS).
+	AllowIP(ctx context.Context, ip string, limitRPS int) (*RateLimitResult, error)
+
+	// AcquireConcurrentJob tenta alocar uma vaga na quota de jobs simultâneos do cliente (status pending/processing).
+	// Retorna Allowed=false com Reason="concurrent_jobs_exceeded" se a cota for atingida.
+	AcquireConcurrentJob(ctx context.Context, apiKey string, maxConcurrent int) (*RateLimitResult, error)
+
+	// ReleaseConcurrentJob decrementa o contador de jobs simultâneos ativos quando o job é finalizado (done/failed).
+	ReleaseConcurrentJob(ctx context.Context, apiKey string) error
+}
+```
+
+---
+
+### 3.12. Política de Retenção de Dados e Expiração no Storage
+Conforme detalhado no [ADR 0008: Política de Retenção de Dados, Expiração de Storage e Privacidade de Logs e Métricas](file:///Users/digopaiva/Documents/projects/file-convert-api/docs/architecture/adr/0008-retencao-de-dados.md):
+
+1. **TTL dos Arquivos no Storage:**
+   - **Arquivo Original (`source/`):** Deletado imediatamente via `Delete()` após o sucesso do job. Para jobs falhos/abandonados, expira via TTL de 24 horas (`24h`).
+   - **Arquivo Convertido (`target/`):** Mantido no storage para download por no máximo **24 horas (`24h`)**, sendo purgado via *Bucket Lifecycle Policy* (S3/MinIO) ou pelo método `DeleteExpired()` (Filesystem local).
+2. **Privacidade Operacional:**
+   - **Conteúdo de arquivo:** Zero gravação ou inspeção de payloads nos adaptadores de log, métricas ou tracing.
+   - **Identificadores Sanitizados:** Apenas `object_key` internos (UUID v4) e metadados estruturados são mantidos.
+
+---
+
+### 3.13. Arquitetura de Conversão Imagem ↔ PDF e Suporte a ZIP
+Conforme estabelecido no [ADR 0009: Arquitetura de Conversão Imagem ↔ PDF e Tratamento de Saída Multipágina em ZIP](file:///Users/digopaiva/Documents/projects/file-convert-api/docs/architecture/adr/0009-conversao-imagem-pdf.md):
+
+1. **Desacoplamento via Subprocessos:**
+   - `.jpg`/`.png` → `.pdf`: Implementado via `ImageToPDFConverter` utilizando o binário ImageMagick (`convert`).
+   - `.pdf` → `.jpg`: Implementado via `PDFToImageConverter` utilizando o binário `pdftoppm` do pacote `poppler-utils` em **300 DPI**.
+2. **Saída Multipágina em Arquivo ZIP:**
+   - Para documentos PDF contendo de 2 a 50 páginas, o adaptador `PDFToImageConverter` gera as imagens individuais numeradas (`page-1.jpg`, `page-2.jpg`, ..., `page-N.jpg`) e as compacta em um único arquivo **`.zip`**.
+   - O arquivo `.zip` é gravado no `ObjectStorage` sob a chave `targets/<job_id>.zip` e atribuído ao campo `TargetObjectKey`.
+   - **Garantia Arquitetural:** Preserva 100% dos contratos das interfaces `JobRepository` e `ObjectStorage` sem requerer alterações no schema da entidade `domain.Job`.
 
 ---
 
@@ -337,4 +437,4 @@ Conforme as diretrizes de governança de arquitetura, foram identificadas as seg
 
 2. **Resultado de PDF para JPG com Múltiplas Páginas:**
    - *Ambiguidade:* Na conversão `.pdf` → `.jpg`, o requisito prevê "disponibilizando a imagem resultante (ou pacote de imagens das páginas)". Para PDFs com mais de 1 página, gerar múltiplos arquivos `.jpg` conflita com o campo único `TargetObjectKey` no schema do Job.
-   - *Decisão de Arquitetura:* Quando um PDF multipáginas for convertido para JPG, a saída será empacotada em um arquivo compactado `.zip` contendo as imagens numeradas (`page-1.jpg`, `page-2.jpg`), permitindo a manutenção do contrato de chave de objeto única no `TargetObjectKey`.
+   - *Decisão de Arquitetura:* Conforme ratificado no [ADR 0009](file:///Users/digopaiva/Documents/projects/file-convert-api/docs/architecture/adr/0009-conversao-imagem-pdf.md), quando um PDF multipáginas for convertido para JPG, a saída será empacotada em um arquivo compactado `.zip` contendo as imagens numeradas (`page-1.jpg`, `page-2.jpg`), permitindo a manutenção do contrato de chave de objeto única no `TargetObjectKey`.

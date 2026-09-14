@@ -6,12 +6,21 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/worker ./cmd/worker
 
 FROM debian:bookworm-slim
+
+# Fixacao estrita de versoes de binarios nativos de conversao (Debian Bookworm)
+# NUNCA utilizar 'latest' ou pacotes sem trava de versao para garantir reprodutibilidade e seguranca.
+ENV FFMPEG_VERSION="7:5.1.*" \
+    LIBREOFFICE_VERSION="1:7.5.*" \
+    IMAGEMAGICK_VERSION="8:6.9.*" \
+    POPPLER_VERSION="22.12.*"
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    libreoffice-writer \
-    imagemagick \
-    poppler-utils \
+    ffmpeg="${FFMPEG_VERSION}" \
+    libreoffice-writer="${LIBREOFFICE_VERSION}" \
+    imagemagick="${IMAGEMAGICK_VERSION}" \
+    poppler-utils="${POPPLER_VERSION}" \
     ca-certificates \
+ && sed -i 's/<policy domain="coder" rights="none" pattern="PDF" \/>/<policy domain="coder" rights="read|write" pattern="PDF" \/>/g' /etc/ImageMagick-6/policy.xml \
  && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m appuser && \

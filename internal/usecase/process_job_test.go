@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/file-convert-api/internal/domain"
-	"github.com/file-convert-api/internal/ports"
 	"github.com/file-convert-api/internal/usecase"
 )
 
@@ -123,6 +122,28 @@ func (c *FakeConverter) Convert(ctx context.Context, src io.Reader, srcFormat, t
 
 // --- TESTES UNITÁRIOS ---
 
+func TestGetTimeoutForFamily(t *testing.T) {
+	tests := []struct {
+		src      domain.Format
+		target   domain.Format
+		expected time.Duration
+	}{
+		{domain.FormatWAV, domain.FormatMP3, 30 * time.Second},
+		{domain.FormatMP3, domain.FormatWAV, 30 * time.Second},
+		{domain.FormatJPG, domain.FormatPDF, 45 * time.Second},
+		{domain.FormatPDF, domain.FormatJPG, 45 * time.Second},
+		{domain.FormatDOCX, domain.FormatPDF, 60 * time.Second},
+		{domain.FormatDOC, domain.FormatPDF, 60 * time.Second},
+	}
+
+	for _, tt := range tests {
+		got := usecase.GetTimeoutForFamily(tt.src, tt.target)
+		if got != tt.expected {
+			t.Errorf("GetTimeoutForFamily(%s -> %s) = %v; esperado %v", tt.src, tt.target, got, tt.expected)
+		}
+	}
+}
+
 func TestProcessJobUseCase_Execute_Success(t *testing.T) {
 	repo := NewFakeJobRepository()
 	storage := NewFakeObjectStorage()
@@ -147,8 +168,9 @@ func TestProcessJobUseCase_Execute_Success(t *testing.T) {
 		Status:          domain.StatusPending,
 		CreatedAt:       time.Now(),
 	}
+	validWavBytes := []byte("RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00")
 	_ = repo.Create(context.Background(), job)
-	_ = storage.Upload(context.Background(), "sources/input.wav", bytes.NewReader([]byte("dummy-wav-content")), 17, "audio/wav")
+	_ = storage.Upload(context.Background(), "sources/input.wav", bytes.NewReader(validWavBytes), int64(len(validWavBytes)), "audio/wav")
 
 	uc := usecase.NewProcessJobUseCase(repo, storage, registry)
 	err := uc.Execute(context.Background(), "job-123")
@@ -234,8 +256,9 @@ func TestProcessJobUseCase_Execute_TimeoutError(t *testing.T) {
 		SourceObjectKey: "sources/slow.wav",
 		Status:          domain.StatusPending,
 	}
+	validWavBytes := []byte("RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00")
 	_ = repo.Create(context.Background(), job)
-	_ = storage.Upload(context.Background(), "sources/slow.wav", bytes.NewReader([]byte("heavy-data")), 10, "audio/wav")
+	_ = storage.Upload(context.Background(), "sources/slow.wav", bytes.NewReader(validWavBytes), int64(len(validWavBytes)), "audio/wav")
 
 	uc := usecase.NewProcessJobUseCase(repo, storage, registry)
 	err := uc.Execute(context.Background(), "job-timeout")

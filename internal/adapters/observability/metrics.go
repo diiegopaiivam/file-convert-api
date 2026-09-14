@@ -160,7 +160,7 @@ func (m *PrometheusMetricsRecorder) Handler() http.HandlerFunc {
 				var cumulative int64
 				for _, le := range defaultBuckets {
 					cumulative += buckets[le]
-					fmt.Fprintf(w, "fileconvert_job_queue_dwell_time_seconds_bucket{source_format=\"%s\",target_format=\"%s\",le=\"%.1f\"} %d\n", src, target, cumulative)
+					fmt.Fprintf(w, "fileconvert_job_queue_dwell_time_seconds_bucket{source_format=\"%s\",target_format=\"%s\",le=\"%.1f\"} %d\n", src, target, le, cumulative)
 				}
 				fmt.Fprintf(w, "fileconvert_job_queue_dwell_time_seconds_bucket{source_format=\"%s\",target_format=\"%s\",le=\"+Inf\"} %d\n", src, target, count)
 				sum := m.dwellTimeSum[key]
