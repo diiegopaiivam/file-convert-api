@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main, master ]
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   govulncheck:
     name: Go Dependency Vulnerability Check
@@ -37,30 +41,30 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build API Docker Image
+      - name: Build API Docker Image for Security Scan
         uses: docker/build-push-action@v5
         with:
           context: .
           file: deploy/docker/Dockerfile.api
           load: true
-          tags: fileconvert-api:latest
+          tags: fileconvert-api:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build Worker Docker Image
+      - name: Build Worker Docker Image for Security Scan
         uses: docker/build-push-action@v5
         with:
           context: .
           file: deploy/docker/Dockerfile.worker
           load: true
-          tags: fileconvert-worker:latest
+          tags: fileconvert-worker:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Run Trivy Vulnerability Scanner on API Image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'fileconvert-api:latest'
+          image-ref: 'fileconvert-api:scan'
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
@@ -70,7 +74,7 @@ jobs:
       - name: Run Trivy Vulnerability Scanner on Worker Image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'fileconvert-worker:latest'
+          image-ref: 'fileconvert-worker:scan'
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true

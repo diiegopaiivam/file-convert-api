@@ -17,7 +17,7 @@ import (
 
 // @title FileConvert API
 // @version 1.0
-// @description API de conversão assíncrona de arquivos de alto desempenho (Hexagonal Architecture).
+// @description API de conversão assíncrona de arquivos de alto desempenho (Hexagonal Architecture), cobrindo as famílias de Áudio (.wav ↔ .mp3), Imagem/PDF (.jpg/.png ↔ .pdf) e Documentos (.doc/.docx → .pdf).
 // @contact.name Suporte FileConvert API
 // @contact.email security@fileconvert.example.com
 // @license.name MIT

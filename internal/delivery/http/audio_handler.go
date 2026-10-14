@@ -56,7 +56,7 @@ type ConversionJobResponse struct {
 }
 
 // @Summary Criar job de conversão de áudio
-// @Description Recebe um arquivo de áudio (.wav ou .mp3) até 50 MB e enfileira um job de conversão assíncrona.
+// @Description Recebe um arquivo de áudio (.wav ou .mp3) de até 50 MB e enfileira um job de conversão assíncrona. Formatos suportados: .wav ↔ .mp3.
 // @Tags Conversions
 // @Accept multipart/form-data
 // @Produce json
@@ -73,15 +73,87 @@ type ConversionJobResponse struct {
 // @Security BearerAuth
 // @Router /v1/conversions/audio [post]
 func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
+	h.handleConversion(w, r, "/v1/conversions/audio")
+}
+
+// @Summary Criar job de conversão de documento
+// @Description Recebe um documento de texto (.doc ou .docx) de até 50 MB e enfileira um job de conversão assíncrona para PDF (.pdf). Formatos suportados: .doc/.docx → .pdf.
+// @Tags Conversions
+// @Accept multipart/form-data
+// @Produce json
+// @Param file formData file true "Arquivo de documento de entrada (.doc ou .docx, máx 50 MB)"
+// @Param target_format formData string true "Formato de destino desejado ('pdf')"
+// @Success 202 {object} ConversionJobResponse "Job criado e enfileirado com sucesso (status: pending)"
+// @Failure 400 {object} domain.APIErrorResponse "Arquivo vazio ou parâmetros inválidos"
+// @Failure 401 {object} domain.APIErrorResponse "Autenticação necessária / Chave de API inválida"
+// @Failure 413 {object} domain.APIErrorResponse "Arquivo enviado excede o limite de 50 MB"
+// @Failure 415 {object} domain.APIErrorResponse "Par de formatos de conversão não suportado"
+// @Failure 429 {object} domain.APIErrorResponse "Limite de requisições por segundo ou quota de jobs simultâneos excedida"
+// @Failure 500 {object} domain.APIErrorResponse "Erro interno do servidor"
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/conversions/document [post]
+func (h *AudioHandler) ConvertDocument(w http.ResponseWriter, r *http.Request) {
+	h.handleConversion(w, r, "/v1/conversions/document")
+}
+
+// @Summary Criar job de conversão de imagem e PDF
+// @Description Recebe uma imagem (.jpg, .png) para conversão para PDF (.pdf), ou um arquivo PDF (.pdf) para conversão para imagem (.jpg). Arquivos PDF multipáginas geram saída empacotada em arquivo .zip. Formatos suportados: .jpg/.png → .pdf e .pdf → .jpg.
+// @Tags Conversions
+// @Accept multipart/form-data
+// @Produce json
+// @Param file formData file true "Arquivo de imagem ou PDF de entrada (.jpg, .png ou .pdf, máx 50 MB)"
+// @Param target_format formData string true "Formato de destino desejado ('pdf' ou 'jpg')"
+// @Success 202 {object} ConversionJobResponse "Job criado e enfileirado com sucesso (status: pending)"
+// @Failure 400 {object} domain.APIErrorResponse "Arquivo vazio ou parâmetros inválidos"
+// @Failure 401 {object} domain.APIErrorResponse "Autenticação necessária / Chave de API inválida"
+// @Failure 413 {object} domain.APIErrorResponse "Arquivo enviado excede o limite de 50 MB"
+// @Failure 415 {object} domain.APIErrorResponse "Par de formatos de conversão não suportado"
+// @Failure 429 {object} domain.APIErrorResponse "Limite de requisições por segundo ou quota de jobs simultâneos excedida"
+// @Failure 500 {object} domain.APIErrorResponse "Erro interno do servidor"
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/conversions/image [post]
+func (h *AudioHandler) ConvertImage(w http.ResponseWriter, r *http.Request) {
+	h.handleConversion(w, r, "/v1/conversions/image")
+}
+
+// @Summary Criar job de conversão unificado
+// @Description Endpoint genérico para conversão assíncrona cobrindo todas as famílias suportadas: Áudio (.wav ↔ .mp3), Imagem/PDF (.jpg/.png ↔ .pdf) e Documentos (.doc/.docx → .pdf).
+// @Tags Conversions
+// @Accept multipart/form-data
+// @Produce json
+// @Param file formData file true "Arquivo de entrada (.wav, .mp3, .jpg, .png, .pdf, .doc, .docx, máx 50 MB)"
+// @Param target_format formData string true "Formato de destino desejado ('mp3', 'wav', 'pdf', 'jpg')"
+// @Success 202 {object} ConversionJobResponse "Job criado e enfileirado com sucesso (status: pending)"
+// @Failure 400 {object} domain.APIErrorResponse "Arquivo vazio ou parâmetros inválidos"
+// @Failure 401 {object} domain.APIErrorResponse "Autenticação necessária / Chave de API inválida"
+// @Failure 413 {object} domain.APIErrorResponse "Arquivo enviado excede o limite de 50 MB"
+// @Failure 415 {object} domain.APIErrorResponse "Par de formatos de conversão não suportado"
+// @Failure 429 {object} domain.APIErrorResponse "Limite de requisições por segundo ou quota de jobs simultâneos excedida"
+// @Failure 500 {object} domain.APIErrorResponse "Erro interno do servidor"
+// @Security ApiKeyAuth
+// @Security BearerAuth
+// @Router /v1/conversions [post]
+func (h *AudioHandler) ConvertGeneric(w http.ResponseWriter, r *http.Request) {
+	h.handleConversion(w, r, "/v1/conversions")
+}
+
+func (h *AudioHandler) handleConversion(w http.ResponseWriter, r *http.Request, defaultEndpoint string) {
+	endpoint := r.URL.Path
+	if endpoint == "" {
+		endpoint = defaultEndpoint
+	}
+
 	if r.Method != http.MethodPost {
-		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusMethodNotAllowed, domain.ErrCodeInternalError)
+		h.metrics.RecordEdgeRequest(r.Context(), r.Method, endpoint, http.StatusMethodNotAllowed, domain.ErrCodeInternalError)
 		renderError(w, http.StatusMethodNotAllowed, domain.ErrCodeInternalError, "Método HTTP não permitido", nil)
 		return
 	}
 
 	// 1. Validar Content-Length antecipadamente antes de processar qualquer payload
 	if r.ContentLength > MaxUploadSize {
-		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge)
+		h.metrics.RecordEdgeRequest(r.Context(), r.Method, endpoint, http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge)
 		renderError(w, http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge, "O arquivo enviado excede o limite máximo permitido de 50 MB.", nil)
 		return
 	}
@@ -90,31 +162,31 @@ func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadSize)
 	if err := r.ParseMultipartForm(MaxUploadSize); err != nil {
 		if strings.Contains(err.Error(), "too large") || strings.Contains(err.Error(), "request body too large") {
-			h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge)
+			h.metrics.RecordEdgeRequest(r.Context(), r.Method, endpoint, http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge)
 			renderError(w, http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge, "O arquivo enviado excede o limite máximo permitido de 50 MB.", nil)
 			return
 		}
-		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusBadRequest, domain.ErrCodeEmptyFile)
+		h.metrics.RecordEdgeRequest(r.Context(), r.Method, endpoint, http.StatusBadRequest, domain.ErrCodeEmptyFile)
 		renderError(w, http.StatusBadRequest, domain.ErrCodeEmptyFile, "Falha ao processar formulário multipart: "+err.Error(), nil)
 		return
 	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusBadRequest, domain.ErrCodeEmptyFile)
+		h.metrics.RecordEdgeRequest(r.Context(), r.Method, endpoint, http.StatusBadRequest, domain.ErrCodeEmptyFile)
 		renderError(w, http.StatusBadRequest, domain.ErrCodeEmptyFile, "O parâmetro 'file' é obrigatório no formulário.", nil)
 		return
 	}
 	defer file.Close()
 
 	if header.Size == 0 {
-		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusBadRequest, domain.ErrCodeEmptyFile)
+		h.metrics.RecordEdgeRequest(r.Context(), r.Method, endpoint, http.StatusBadRequest, domain.ErrCodeEmptyFile)
 		renderError(w, http.StatusBadRequest, domain.ErrCodeEmptyFile, "O arquivo enviado está vazio (0 bytes).", nil)
 		return
 	}
 
 	if header.Size > MaxUploadSize {
-		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge)
+		h.metrics.RecordEdgeRequest(r.Context(), r.Method, endpoint, http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge)
 		renderError(w, http.StatusRequestEntityTooLarge, domain.ErrCodeFileTooLarge, "O arquivo enviado excede o limite máximo permitido de 50 MB.", nil)
 		return
 	}
@@ -122,7 +194,7 @@ func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
 	targetFormatStr := strings.ToLower(strings.TrimSpace(r.FormValue("target_format")))
 	targetFormatStr = strings.Trim(targetFormatStr, "\"'")
 	if targetFormatStr == "" {
-		h.metrics.RecordEdgeRequest(r.Context(), r.Method, "/v1/conversions/audio", http.StatusBadRequest, domain.ErrCodeUnsupportedFormat)
+		h.metrics.RecordEdgeRequest(r.Context(), r.Method, endpoint, http.StatusBadRequest, domain.ErrCodeUnsupportedFormat)
 		renderError(w, http.StatusBadRequest, domain.ErrCodeUnsupportedFormat, "O parâmetro 'target_format' é obrigatório.", nil)
 		return
 	}
@@ -133,7 +205,7 @@ func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
 
 	// Validar se é um par de conversão suportado no domínio
 	if !domain.IsValidConversionPair(sourceFormat, targetFormat) {
-		h.metrics.RecordEdgeRequest(r.Context(), r.Method, r.URL.Path, http.StatusUnsupportedMediaType, domain.ErrCodeUnsupportedFormat)
+		h.metrics.RecordEdgeRequest(r.Context(), r.Method, endpoint, http.StatusUnsupportedMediaType, domain.ErrCodeUnsupportedFormat)
 		renderError(w, http.StatusUnsupportedMediaType, domain.ErrCodeUnsupportedFormat,
 			fmt.Sprintf("Conversão de '%s' para '%s' não é suportada na v1.", sourceFormat, targetFormat), nil)
 		return
@@ -148,7 +220,7 @@ func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
 	contentType := getContentType(sourceFormat)
 	if err := h.storage.Upload(ctx, sourceKey, file, header.Size, contentType); err != nil {
 		h.logger.Error(ctx, "Falha ao armazenar arquivo recebido no storage", ports.Field{Key: "error", Value: err.Error()})
-		h.metrics.RecordEdgeRequest(ctx, r.Method, "/v1/conversions/audio", http.StatusInternalServerError, domain.ErrCodeInternalError)
+		h.metrics.RecordEdgeRequest(ctx, r.Method, endpoint, http.StatusInternalServerError, domain.ErrCodeInternalError)
 		renderError(w, http.StatusInternalServerError, domain.ErrCodeInternalError, "Falha ao armazenar arquivo enviado: "+err.Error(), nil)
 		return
 	}
@@ -167,7 +239,7 @@ func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.repo.Create(ctx, job); err != nil {
 		h.logger.Error(ctx, "Falha ao criar registro do job no repositório", ports.Field{Key: "error", Value: err.Error()})
-		h.metrics.RecordEdgeRequest(ctx, r.Method, "/v1/conversions/audio", http.StatusInternalServerError, domain.ErrCodeInternalError)
+		h.metrics.RecordEdgeRequest(ctx, r.Method, endpoint, http.StatusInternalServerError, domain.ErrCodeInternalError)
 		renderError(w, http.StatusInternalServerError, domain.ErrCodeInternalError, "Falha ao criar registro de job: "+err.Error(), nil)
 		return
 	}
@@ -175,13 +247,14 @@ func (h *AudioHandler) ConvertAudio(w http.ResponseWriter, r *http.Request) {
 	// Enfileirar Job
 	if err := h.queue.Enqueue(ctx, jobID); err != nil {
 		h.logger.Error(ctx, "Falha ao enfileirar job", ports.Field{Key: "error", Value: err.Error()})
-		h.metrics.RecordEdgeRequest(ctx, r.Method, "/v1/conversions/audio", http.StatusInternalServerError, domain.ErrCodeInternalError)
+		h.metrics.RecordEdgeRequest(ctx, r.Method, endpoint, http.StatusInternalServerError, domain.ErrCodeInternalError)
 		renderError(w, http.StatusInternalServerError, domain.ErrCodeInternalError, "Falha ao enfileirar job: "+err.Error(), nil)
 		return
 	}
 
-	h.metrics.RecordEdgeRequest(ctx, r.Method, "/v1/conversions/audio", http.StatusAccepted, "NONE")
-	h.logger.Info(ctx, "Recepção de job de áudio efetuada com sucesso (status pending)",
+	h.metrics.RecordEdgeRequest(ctx, r.Method, endpoint, http.StatusAccepted, "NONE")
+	h.logger.Info(ctx, "Recepção de job de conversão efetuada com sucesso (status pending)",
+		ports.Field{Key: "endpoint", Value: endpoint},
 		ports.Field{Key: "source_format", Value: sourceFormat},
 		ports.Field{Key: "target_format", Value: targetFormat},
 		ports.Field{Key: "file_size_bytes", Value: header.Size},

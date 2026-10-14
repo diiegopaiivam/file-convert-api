@@ -1,5 +1,6 @@
 version: 2
 updates:
+  # 1. Ecossistema Go: Monitora dependências em go.mod e go.sum
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
@@ -9,7 +10,11 @@ updates:
     labels:
       - "dependencies"
       - "security"
+      - "golang"
+    commit-message:
+      prefix: "chore(deps)"
 
+  # 2. Ecossistema Docker: Monitora imagens base dos Dockerfiles em deploy/docker/ (Dockerfile.api e Dockerfile.worker)
   - package-ecosystem: "docker"
     directory: "/deploy/docker"
     schedule:
@@ -19,7 +24,11 @@ updates:
     labels:
       - "docker"
       - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "chore(docker)"
 
+  # 3. Ecossistema GitHub Actions: Monitora versões das actions em .github/workflows/
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -29,3 +38,5 @@ updates:
     labels:
       - "ci"
       - "dependencies"
+    commit-message:
+      prefix: "chore(ci)"

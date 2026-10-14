@@ -22,6 +22,109 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/health": {
+            "get": {
+                "description": "Endpoint público para verificação da saúde do serviço",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Health"
+                ],
+                "summary": "Health Check",
+                "responses": {
+                    "200": {
+                        "description": "Status OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.HealthResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/conversions": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    },
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Endpoint genérico para conversão assíncrona cobrindo todas as famílias suportadas: Áudio (.wav ↔ .mp3), Imagem/PDF (.jpg/.png ↔ .pdf) e Documentos (.doc/.docx → .pdf).",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Conversions"
+                ],
+                "summary": "Criar job de conversão unificado",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Arquivo de entrada (.wav, .mp3, .jpg, .png, .pdf, .doc, .docx, máx 50 MB)",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Formato de destino desejado ('mp3', 'wav', 'pdf', 'jpg')",
+                        "name": "target_format",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Job criado e enfileirado com sucesso (status: pending)",
+                        "schema": {
+                            "$ref": "#/definitions/http.ConversionJobResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Arquivo vazio ou parâmetros inválidos",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Autenticação necessária / Chave de API inválida",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Arquivo enviado excede o limite de 50 MB",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Par de formatos de conversão não suportado",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Limite de requisições por segundo ou quota de jobs simultâneos excedida",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Erro interno do servidor",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/conversions/audio": {
             "post": {
                 "security": [
@@ -32,7 +135,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Recebe um arquivo de áudio (.wav ou .mp3) de até 50 MB e enfileira um job de conversão assíncrona.",
+                "description": "Recebe um arquivo de áudio (.wav ou .mp3) de até 50 MB e enfileira um job de conversão assíncrona. Formatos suportados: .wav ↔ .mp3.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -61,45 +164,211 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "202": {
-                        "description": "Job criado e enfileirado com sucesso (status pending)",
+                        "description": "Job criado e enfileirado com sucesso (status: pending)",
                         "schema": {
-                            "$ref": "#/definitions/internal_delivery_http.ConversionJobResponse"
+                            "$ref": "#/definitions/http.ConversionJobResponse"
                         }
                     },
                     "400": {
                         "description": "Arquivo vazio ou parâmetros inválidos",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Autenticação necessária / Chave de API inválida",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "413": {
                         "description": "Arquivo enviado excede o limite de 50 MB",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "415": {
                         "description": "Par de formatos de conversão não suportado",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "429": {
                         "description": "Limite de requisições por segundo ou quota de jobs simultâneos excedida",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Erro interno do servidor",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/conversions/document": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    },
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Recebe um documento de texto (.doc ou .docx) de até 50 MB e enfileira um job de conversão assíncrona para PDF (.pdf). Formatos suportados: .doc/.docx → .pdf.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Conversions"
+                ],
+                "summary": "Criar job de conversão de documento",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Arquivo de documento de entrada (.doc ou .docx, máx 50 MB)",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Formato de destino desejado ('pdf')",
+                        "name": "target_format",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Job criado e enfileirado com sucesso (status: pending)",
+                        "schema": {
+                            "$ref": "#/definitions/http.ConversionJobResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Arquivo vazio ou parâmetros inválidos",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Autenticação necessária / Chave de API inválida",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Arquivo enviado excede o limite de 50 MB",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Par de formatos de conversão não suportado",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Limite de requisições por segundo ou quota de jobs simultâneos excedida",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Erro interno do servidor",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/conversions/image": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    },
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Recebe uma imagem (.jpg, .png) para conversão para PDF (.pdf), ou um arquivo PDF (.pdf) para conversão para imagem (.jpg). Arquivos PDF multipáginas geram saída empacotada em arquivo .zip. Formatos suportados: .jpg/.png → .pdf e .pdf → .jpg.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Conversions"
+                ],
+                "summary": "Criar job de conversão de imagem e PDF",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Arquivo de imagem ou PDF de entrada (.jpg, .png ou .pdf, máx 50 MB)",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Formato de destino desejado ('pdf' ou 'jpg')",
+                        "name": "target_format",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Job criado e enfileirado com sucesso (status: pending)",
+                        "schema": {
+                            "$ref": "#/definitions/http.ConversionJobResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Arquivo vazio ou parâmetros inválidos",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Autenticação necessária / Chave de API inválida",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Arquivo enviado excede o limite de 50 MB",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Par de formatos de conversão não suportado",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Limite de requisições por segundo ou quota de jobs simultâneos excedida",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Erro interno do servidor",
+                        "schema": {
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     }
                 }
@@ -115,7 +384,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retorna o estado atual do job de conversão assíncrono, URL de download (quando concluído) ou detalhes do erro tipado (quando falho).",
+                "description": "Retorna o estado atual do job de conversão e o URL de download caso concluído com sucesso.",
                 "produces": [
                     "application/json"
                 ],
@@ -126,7 +395,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "ID único do job (ex. job_a1b2c3d4)",
+                        "description": "ID único do job",
                         "name": "job_id",
                         "in": "path",
                         "required": true
@@ -136,31 +405,31 @@ const docTemplate = `{
                     "200": {
                         "description": "Status e detalhes do job",
                         "schema": {
-                            "$ref": "#/definitions/internal_delivery_http.JobStatusResponse"
+                            "$ref": "#/definitions/http.JobStatusResponse"
                         }
                     },
                     "401": {
                         "description": "Autenticação necessária / Chave de API inválida",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Job não encontrado",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "429": {
                         "description": "Limite de requisições excedido",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Erro interno do servidor",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     }
                 }
@@ -207,33 +476,33 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Job ainda não concluído ou sem arquivo disponível",
+                        "description": "Job ainda não concluído ou sem arquivo gerado",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Autenticação necessária / Chave de API inválida",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "404": {
-                        "description": "Job ou arquivo não encontrado no armazenamento (expirado após 24h)",
+                        "description": "Job ou arquivo não encontrado no storage (expirado após 24h)",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "429": {
                         "description": "Limite de requisições excedido",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Erro interno do servidor",
                         "schema": {
-                            "$ref": "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+                            "$ref": "#/definitions/domain.APIErrorResponse"
                         }
                     }
                 }
@@ -241,43 +510,38 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "github_com_file-convert-api_internal_domain.APIErrorResponse": {
+        "domain.APIErrorResponse": {
             "type": "object",
             "properties": {
                 "code": {
-                    "type": "string",
-                    "example": "FILE_TOO_LARGE"
+                    "type": "string"
                 },
                 "details": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_file-convert-api_internal_domain.ErrorDetail"
+                        "$ref": "#/definitions/domain.ErrorDetail"
                     }
                 },
                 "message": {
-                    "type": "string",
-                    "example": "O arquivo enviado excede o limite máximo permitido de 50 MB."
+                    "type": "string"
                 },
                 "timestamp": {
-                    "type": "string",
-                    "example": "2026-09-14T16:00:00Z"
+                    "type": "string"
                 }
             }
         },
-        "github_com_file-convert-api_internal_domain.ErrorDetail": {
+        "domain.ErrorDetail": {
             "type": "object",
             "properties": {
                 "field": {
-                    "type": "string",
-                    "example": "file"
+                    "type": "string"
                 },
                 "issue": {
-                    "type": "string",
-                    "example": "O arquivo enviado excede o limite máximo de 50 MB."
+                    "type": "string"
                 }
             }
         },
-        "github_com_file-convert-api_internal_domain.Format": {
+        "domain.Format": {
             "type": "string",
             "enum": [
                 "wav",
@@ -298,26 +562,24 @@ const docTemplate = `{
                 "FormatDOCX"
             ]
         },
-        "github_com_file-convert-api_internal_domain.JobError": {
+        "domain.JobError": {
             "type": "object",
             "properties": {
                 "code": {
-                    "type": "string",
-                    "example": "CORRUPTED_FILE"
+                    "type": "string"
                 },
                 "details": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_file-convert-api_internal_domain.ErrorDetail"
+                        "$ref": "#/definitions/domain.ErrorDetail"
                     }
                 },
                 "message": {
-                    "type": "string",
-                    "example": "O arquivo enviado está corrompido e não pôde ser processado."
+                    "type": "string"
                 }
             }
         },
-        "github_com_file-convert-api_internal_domain.JobStatus": {
+        "domain.JobStatus": {
             "type": "string",
             "enum": [
                 "pending",
@@ -332,7 +594,7 @@ const docTemplate = `{
                 "StatusFailed"
             ]
         },
-        "internal_delivery_http.ConversionJobResponse": {
+        "http.ConversionJobResponse": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -344,17 +606,41 @@ const docTemplate = `{
                     "example": "job_a1b2c3d4"
                 },
                 "source_format": {
-                    "$ref": "#/definitions/github_com_file-convert-api_internal_domain.Format"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/domain.Format"
+                        }
+                    ],
+                    "example": "wav"
                 },
                 "status": {
-                    "$ref": "#/definitions/github_com_file-convert-api_internal_domain.JobStatus"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/domain.JobStatus"
+                        }
+                    ],
+                    "example": "pending"
                 },
                 "target_format": {
-                    "$ref": "#/definitions/github_com_file-convert-api_internal_domain.Format"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/domain.Format"
+                        }
+                    ],
+                    "example": "mp3"
                 }
             }
         },
-        "internal_delivery_http.JobStatusResponse": {
+        "http.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
+        "http.JobStatusResponse": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -366,20 +652,35 @@ const docTemplate = `{
                     "example": "/v1/jobs/job_a1b2c3d4/download"
                 },
                 "error": {
-                    "$ref": "#/definitions/github_com_file-convert-api_internal_domain.JobError"
+                    "$ref": "#/definitions/domain.JobError"
                 },
                 "job_id": {
                     "type": "string",
                     "example": "job_a1b2c3d4"
                 },
                 "source_format": {
-                    "$ref": "#/definitions/github_com_file-convert-api_internal_domain.Format"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/domain.Format"
+                        }
+                    ],
+                    "example": "wav"
                 },
                 "status": {
-                    "$ref": "#/definitions/github_com_file-convert-api_internal_domain.JobStatus"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/domain.JobStatus"
+                        }
+                    ],
+                    "example": "done"
                 },
                 "target_format": {
-                    "$ref": "#/definitions/github_com_file-convert-api_internal_domain.Format"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/domain.Format"
+                        }
+                    ],
+                    "example": "mp3"
                 },
                 "updated_at": {
                     "type": "string",
@@ -396,7 +697,7 @@ const docTemplate = `{
             "in": "header"
         },
         "BearerAuth": {
-            "description": "Autenticação via cabeçalho Authorization: Bearer <api_key>",
+            "description": "Autenticação via cabeçalho Authorization: Bearer \u003capi_key\u003e",
             "type": "apiKey",
             "name": "Authorization",
             "in": "header"
@@ -409,7 +710,7 @@ var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
 	Host:             "localhost:8080",
 	BasePath:         "/",
-	Schemes:          []string{"http", "https"},
+	Schemes:          []string{},
 	Title:            "FileConvert API",
 	Description:      "API de conversão assíncrona de arquivos de alto desempenho (Hexagonal Architecture), cobrindo as famílias de Áudio (.wav ↔ .mp3), Imagem/PDF (.jpg/.png ↔ .pdf) e Documentos (.doc/.docx → .pdf).",
 	InfoInstanceName: "swagger",

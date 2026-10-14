@@ -17,6 +17,20 @@ type RouterOptions struct {
 	Metrics ports.MetricsRecorder
 }
 
+type HealthResponse struct {
+	Status string `json:"status" example:"ok"`
+}
+
+// @Summary Health Check
+// @Description Endpoint público para verificação da saúde do serviço
+// @Tags Health
+// @Produce json
+// @Success 200 {object} HealthResponse "Status OK"
+// @Router /health [get]
+func HealthCheck(w http.ResponseWriter, r *http.Request) {
+	renderJSON(w, http.StatusOK, HealthResponse{Status: "ok"})
+}
+
 func NewRouterWithOptions(opts RouterOptions) *http.ServeMux {
 	mux := http.NewServeMux()
 
@@ -33,15 +47,7 @@ func NewRouterWithOptions(opts RouterOptions) *http.ServeMux {
 
 	jobHandler := NewJobHandler(opts.Repo, opts.Storage)
 
-	// @Summary Health Check
-	// @Description Endpoint público para verificação da saúde do serviço
-	// @Tags Health
-	// @Produce json
-	// @Success 200 {object} map[string]string "Status OK"
-	// @Router /health [get]
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		renderJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	mux.HandleFunc("/health", HealthCheck)
 
 	// @Summary Métricas Prometheus
 	// @Description Exposição de telemetria e métricas de negócio do Prometheus
@@ -60,9 +66,9 @@ func NewRouterWithOptions(opts RouterOptions) *http.ServeMux {
 	}
 
 	mux.HandleFunc("/v1/conversions/audio", audioHandler.ConvertAudio)
-	mux.HandleFunc("/v1/conversions/document", audioHandler.ConvertAudio)
-	mux.HandleFunc("/v1/conversions/image", audioHandler.ConvertAudio)
-	mux.HandleFunc("/v1/conversions", audioHandler.ConvertAudio)
+	mux.HandleFunc("/v1/conversions/document", audioHandler.ConvertDocument)
+	mux.HandleFunc("/v1/conversions/image", audioHandler.ConvertImage)
+	mux.HandleFunc("/v1/conversions", audioHandler.ConvertGeneric)
 	mux.HandleFunc("/v1/jobs/", jobHandler.HandleJob)
 
 	// Rotas da Documentação OpenAPI / Swagger UI (Públicas, sem auth)

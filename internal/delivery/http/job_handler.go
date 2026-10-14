@@ -107,9 +107,9 @@ func (h *JobHandler) GetJobStatus(w http.ResponseWriter, r *http.Request, jobID 
 }
 
 // @Summary Baixar resultado da conversão
-// @Description Realiza o download do arquivo binário gerado pela conversão concluída.
+// @Description Realiza o download do arquivo binário gerado pela conversão concluída (ou arquivo .zip em caso de PDF multipáginas).
 // @Tags Jobs
-// @Produce octet-stream,audio/mpeg,audio/wav,application/pdf,image/jpeg,image/png
+// @Produce octet-stream,audio/mpeg,audio/wav,application/pdf,image/jpeg,image/png,application/zip
 // @Param job_id path string true "ID único do job"
 // @Success 200 {file} binary "Arquivo binário convertido"
 // @Failure 400 {object} domain.APIErrorResponse "Job ainda não concluído ou sem arquivo gerado"

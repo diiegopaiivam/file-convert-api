@@ -1,284 +1,472 @@
-swagger: "2.0"
+basePath: /
+definitions:
+  domain.APIErrorResponse:
+    properties:
+      code:
+        type: string
+      details:
+        items:
+          $ref: '#/definitions/domain.ErrorDetail'
+        type: array
+      message:
+        type: string
+      timestamp:
+        type: string
+    type: object
+  domain.ErrorDetail:
+    properties:
+      field:
+        type: string
+      issue:
+        type: string
+    type: object
+  domain.Format:
+    enum:
+    - wav
+    - mp3
+    - jpg
+    - png
+    - pdf
+    - doc
+    - docx
+    type: string
+    x-enum-varnames:
+    - FormatWAV
+    - FormatMP3
+    - FormatJPG
+    - FormatPNG
+    - FormatPDF
+    - FormatDOC
+    - FormatDOCX
+  domain.JobError:
+    properties:
+      code:
+        type: string
+      details:
+        items:
+          $ref: '#/definitions/domain.ErrorDetail'
+        type: array
+      message:
+        type: string
+    type: object
+  domain.JobStatus:
+    enum:
+    - pending
+    - processing
+    - done
+    - failed
+    type: string
+    x-enum-varnames:
+    - StatusPending
+    - StatusProcessing
+    - StatusDone
+    - StatusFailed
+  http.ConversionJobResponse:
+    properties:
+      created_at:
+        example: "2026-09-14T15:00:00Z"
+        type: string
+      job_id:
+        example: job_a1b2c3d4
+        type: string
+      source_format:
+        allOf:
+        - $ref: '#/definitions/domain.Format'
+        example: wav
+      status:
+        allOf:
+        - $ref: '#/definitions/domain.JobStatus'
+        example: pending
+      target_format:
+        allOf:
+        - $ref: '#/definitions/domain.Format'
+        example: mp3
+    type: object
+  http.HealthResponse:
+    properties:
+      status:
+        example: ok
+        type: string
+    type: object
+  http.JobStatusResponse:
+    properties:
+      created_at:
+        example: "2026-09-14T15:00:00Z"
+        type: string
+      download_url:
+        example: /v1/jobs/job_a1b2c3d4/download
+        type: string
+      error:
+        $ref: '#/definitions/domain.JobError'
+      job_id:
+        example: job_a1b2c3d4
+        type: string
+      source_format:
+        allOf:
+        - $ref: '#/definitions/domain.Format'
+        example: wav
+      status:
+        allOf:
+        - $ref: '#/definitions/domain.JobStatus'
+        example: done
+      target_format:
+        allOf:
+        - $ref: '#/definitions/domain.Format'
+        example: mp3
+      updated_at:
+        example: "2026-09-14T15:00:10Z"
+        type: string
+    type: object
+host: localhost:8080
 info:
-  title: FileConvert API
-  description: API de conversão assíncrona de arquivos de alto desempenho (Hexagonal Architecture), cobrindo as famílias de Áudio (.wav ↔ .mp3), Imagem/PDF (.jpg/.png ↔ .pdf) e Documentos (.doc/.docx → .pdf).
-  version: "1.0"
   contact:
-    name: Suporte FileConvert API
     email: security@fileconvert.example.com
+    name: Suporte FileConvert API
+  description: API de conversão assíncrona de arquivos de alto desempenho (Hexagonal
+    Architecture), cobrindo as famílias de Áudio (.wav ↔ .mp3), Imagem/PDF (.jpg/.png
+    ↔ .pdf) e Documentos (.doc/.docx → .pdf).
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-host: localhost:8080
-basePath: /
-schemes:
-  - http
-  - https
+  title: FileConvert API
+  version: "1.0"
 paths:
-  /v1/conversions/audio:
-    post:
-      summary: Criar job de conversão de áudio
-      description: Recebe um arquivo de áudio (.wav ou .mp3) de até 50 MB e enfileira um job de conversão assíncrona.
-      tags:
-        - Conversions
-      consumes:
-        - multipart/form-data
+  /health:
+    get:
+      description: Endpoint público para verificação da saúde do serviço
       produces:
-        - application/json
-      security:
-        - ApiKeyAuth: []
-        - BearerAuth: []
+      - application/json
+      responses:
+        "200":
+          description: Status OK
+          schema:
+            $ref: '#/definitions/http.HealthResponse'
+      summary: Health Check
+      tags:
+      - Health
+  /v1/conversions:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 'Endpoint genérico para conversão assíncrona cobrindo todas as
+        famílias suportadas: Áudio (.wav ↔ .mp3), Imagem/PDF (.jpg/.png ↔ .pdf) e
+        Documentos (.doc/.docx → .pdf).'
       parameters:
-        - name: file
-          in: formData
-          type: file
-          required: true
-          description: Arquivo de áudio de entrada (.wav ou .mp3, máx 50 MB)
-        - name: target_format
-          in: formData
-          type: string
-          required: true
-          description: Formato de destino desejado ('mp3' ou 'wav')
+      - description: Arquivo de entrada (.wav, .mp3, .jpg, .png, .pdf, .doc, .docx,
+          máx 50 MB)
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Formato de destino desejado ('mp3', 'wav', 'pdf', 'jpg')
+        in: formData
+        name: target_format
+        required: true
+        type: string
+      produces:
+      - application/json
       responses:
         "202":
-          description: Job criado e enfileirado com sucesso (status pending)
+          description: 'Job criado e enfileirado com sucesso (status: pending)'
           schema:
-            $ref: "#/definitions/internal_delivery_http.ConversionJobResponse"
+            $ref: '#/definitions/http.ConversionJobResponse'
         "400":
           description: Arquivo vazio ou parâmetros inválidos
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "401":
           description: Autenticação necessária / Chave de API inválida
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "413":
           description: Arquivo enviado excede o limite de 50 MB
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "415":
           description: Par de formatos de conversão não suportado
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "429":
-          description: Limite de requisições por segundo ou quota de jobs simultâneos excedida
+          description: Limite de requisições por segundo ou quota de jobs simultâneos
+            excedida
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "500":
           description: Erro interno do servidor
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
-
+            $ref: '#/definitions/domain.APIErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Criar job de conversão unificado
+      tags:
+      - Conversions
+  /v1/conversions/audio:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 'Recebe um arquivo de áudio (.wav ou .mp3) de até 50 MB e enfileira
+        um job de conversão assíncrona. Formatos suportados: .wav ↔ .mp3.'
+      parameters:
+      - description: Arquivo de áudio de entrada (.wav ou .mp3, máx 50 MB)
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Formato de destino desejado ('mp3' ou 'wav')
+        in: formData
+        name: target_format
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: 'Job criado e enfileirado com sucesso (status: pending)'
+          schema:
+            $ref: '#/definitions/http.ConversionJobResponse'
+        "400":
+          description: Arquivo vazio ou parâmetros inválidos
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "401":
+          description: Autenticação necessária / Chave de API inválida
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "413":
+          description: Arquivo enviado excede o limite de 50 MB
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "415":
+          description: Par de formatos de conversão não suportado
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "429":
+          description: Limite de requisições por segundo ou quota de jobs simultâneos
+            excedida
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "500":
+          description: Erro interno do servidor
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Criar job de conversão de áudio
+      tags:
+      - Conversions
+  /v1/conversions/document:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 'Recebe um documento de texto (.doc ou .docx) de até 50 MB e enfileira
+        um job de conversão assíncrona para PDF (.pdf). Formatos suportados: .doc/.docx
+        → .pdf.'
+      parameters:
+      - description: Arquivo de documento de entrada (.doc ou .docx, máx 50 MB)
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Formato de destino desejado ('pdf')
+        in: formData
+        name: target_format
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: 'Job criado e enfileirado com sucesso (status: pending)'
+          schema:
+            $ref: '#/definitions/http.ConversionJobResponse'
+        "400":
+          description: Arquivo vazio ou parâmetros inválidos
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "401":
+          description: Autenticação necessária / Chave de API inválida
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "413":
+          description: Arquivo enviado excede o limite de 50 MB
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "415":
+          description: Par de formatos de conversão não suportado
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "429":
+          description: Limite de requisições por segundo ou quota de jobs simultâneos
+            excedida
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "500":
+          description: Erro interno do servidor
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Criar job de conversão de documento
+      tags:
+      - Conversions
+  /v1/conversions/image:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 'Recebe uma imagem (.jpg, .png) para conversão para PDF (.pdf),
+        ou um arquivo PDF (.pdf) para conversão para imagem (.jpg). Arquivos PDF multipáginas
+        geram saída empacotada em arquivo .zip. Formatos suportados: .jpg/.png → .pdf
+        e .pdf → .jpg.'
+      parameters:
+      - description: Arquivo de imagem ou PDF de entrada (.jpg, .png ou .pdf, máx
+          50 MB)
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Formato de destino desejado ('pdf' ou 'jpg')
+        in: formData
+        name: target_format
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: 'Job criado e enfileirado com sucesso (status: pending)'
+          schema:
+            $ref: '#/definitions/http.ConversionJobResponse'
+        "400":
+          description: Arquivo vazio ou parâmetros inválidos
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "401":
+          description: Autenticação necessária / Chave de API inválida
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "413":
+          description: Arquivo enviado excede o limite de 50 MB
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "415":
+          description: Par de formatos de conversão não suportado
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "429":
+          description: Limite de requisições por segundo ou quota de jobs simultâneos
+            excedida
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+        "500":
+          description: Erro interno do servidor
+          schema:
+            $ref: '#/definitions/domain.APIErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Criar job de conversão de imagem e PDF
+      tags:
+      - Conversions
   /v1/jobs/{job_id}:
     get:
-      summary: Consultar status do job
-      description: Retorna o estado atual do job de conversão assíncrono, URL de download (quando concluído) ou detalhes do erro tipado (quando falho).
-      tags:
-        - Jobs
-      produces:
-        - application/json
-      security:
-        - ApiKeyAuth: []
-        - BearerAuth: []
+      description: Retorna o estado atual do job de conversão e o URL de download
+        caso concluído com sucesso.
       parameters:
-        - name: job_id
-          in: path
-          type: string
-          required: true
-          description: ID único do job (ex. job_a1b2c3d4)
+      - description: ID único do job
+        in: path
+        name: job_id
+        required: true
+        type: string
+      produces:
+      - application/json
       responses:
         "200":
           description: Status e detalhes do job
           schema:
-            $ref: "#/definitions/internal_delivery_http.JobStatusResponse"
+            $ref: '#/definitions/http.JobStatusResponse'
         "401":
           description: Autenticação necessária / Chave de API inválida
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "404":
           description: Job não encontrado
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "429":
           description: Limite de requisições excedido
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "500":
           description: Erro interno do servidor
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
-
+            $ref: '#/definitions/domain.APIErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Consultar status do job
+      tags:
+      - Jobs
   /v1/jobs/{job_id}/download:
     get:
-      summary: Baixar resultado da conversão
-      description: Realiza o download do arquivo binário gerado pela conversão concluída (ou arquivo .zip em caso de PDF multipáginas).
-      tags:
-        - Jobs
-      produces:
-        - application/octet-stream
-        - audio/mpeg
-        - audio/wav
-        - application/pdf
-        - image/jpeg
-        - image/png
-        - application/zip
-      security:
-        - ApiKeyAuth: []
-        - BearerAuth: []
+      description: Realiza o download do arquivo binário gerado pela conversão concluída
+        (ou arquivo .zip em caso de PDF multipáginas).
       parameters:
-        - name: job_id
-          in: path
-          type: string
-          required: true
-          description: ID único do job
+      - description: ID único do job
+        in: path
+        name: job_id
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      - audio/mpeg
+      - audio/wav
+      - application/pdf
+      - image/jpeg
+      - image/png
+      - application/zip
       responses:
         "200":
           description: Arquivo binário convertido
           schema:
             type: file
         "400":
-          description: Job ainda não concluído ou sem arquivo disponível
+          description: Job ainda não concluído ou sem arquivo gerado
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "401":
           description: Autenticação necessária / Chave de API inválida
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "404":
-          description: Job ou arquivo não encontrado no armazenamento (expirado após 24h)
+          description: Job ou arquivo não encontrado no storage (expirado após 24h)
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "429":
           description: Limite de requisições excedido
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
+            $ref: '#/definitions/domain.APIErrorResponse'
         "500":
           description: Erro interno do servidor
           schema:
-            $ref: "#/definitions/github_com_file-convert-api_internal_domain.APIErrorResponse"
-
+            $ref: '#/definitions/domain.APIErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      - BearerAuth: []
+      summary: Baixar resultado da conversão
+      tags:
+      - Jobs
 securityDefinitions:
   ApiKeyAuth:
-    type: apiKey
-    name: X-API-Key
-    in: header
     description: Autenticação via cabeçalho X-API-Key
-  BearerAuth:
-    type: apiKey
-    name: Authorization
     in: header
-    description: "Autenticação via cabeçalho Authorization: Bearer <api_key>"
-
-definitions:
-  github_com_file-convert-api_internal_domain.Format:
-    type: string
-    enum:
-      - wav
-      - mp3
-      - jpg
-      - png
-      - pdf
-      - doc
-      - docx
-    x-enum-varnames:
-      - FormatWAV
-      - FormatMP3
-      - FormatJPG
-      - FormatPNG
-      - FormatPDF
-      - FormatDOC
-      - FormatDOCX
-
-  github_com_file-convert-api_internal_domain.JobStatus:
-    type: string
-    enum:
-      - pending
-      - processing
-      - done
-      - failed
-    x-enum-varnames:
-      - StatusPending
-      - StatusProcessing
-      - StatusDone
-      - StatusFailed
-
-  github_com_file-convert-api_internal_domain.ErrorDetail:
-    type: object
-    properties:
-      field:
-        type: string
-        example: file
-      issue:
-        type: string
-        example: "O arquivo enviado excede o limite máximo de 50 MB."
-
-  github_com_file-convert-api_internal_domain.APIErrorResponse:
-    type: object
-    properties:
-      code:
-        type: string
-        example: FILE_TOO_LARGE
-      message:
-        type: string
-        example: "O arquivo enviado excede o limite máximo permitido de 50 MB."
-      details:
-        type: array
-        items:
-          $ref: "#/definitions/github_com_file-convert-api_internal_domain.ErrorDetail"
-      timestamp:
-        type: string
-        example: "2026-09-14T16:00:00Z"
-
-  github_com_file-convert-api_internal_domain.JobError:
-    type: object
-    properties:
-      code:
-        type: string
-        example: CORRUPTED_FILE
-      message:
-        type: string
-        example: "O arquivo enviado está corrompido e não pôde ser processado."
-      details:
-        type: array
-        items:
-          $ref: "#/definitions/github_com_file-convert-api_internal_domain.ErrorDetail"
-
-  internal_delivery_http.ConversionJobResponse:
-    type: object
-    properties:
-      job_id:
-        type: string
-        example: job_a1b2c3d4
-      source_format:
-        $ref: "#/definitions/github_com_file-convert-api_internal_domain.Format"
-      target_format:
-        $ref: "#/definitions/github_com_file-convert-api_internal_domain.Format"
-      status:
-        $ref: "#/definitions/github_com_file-convert-api_internal_domain.JobStatus"
-      created_at:
-        type: string
-        example: "2026-09-14T15:00:00Z"
-
-  internal_delivery_http.JobStatusResponse:
-    type: object
-    properties:
-      job_id:
-        type: string
-        example: job_a1b2c3d4
-      source_format:
-        $ref: "#/definitions/github_com_file-convert-api_internal_domain.Format"
-      target_format:
-        $ref: "#/definitions/github_com_file-convert-api_internal_domain.Format"
-      status:
-        $ref: "#/definitions/github_com_file-convert-api_internal_domain.JobStatus"
-      download_url:
-        type: string
-        example: /v1/jobs/job_a1b2c3d4/download
-      error:
-        $ref: "#/definitions/github_com_file-convert-api_internal_domain.JobError"
-      created_at:
-        type: string
-        example: "2026-09-14T15:00:00Z"
-      updated_at:
-        type: string
-        example: "2026-09-14T15:00:10Z"
+    name: X-API-Key
+    type: apiKey
+  BearerAuth:
+    description: 'Autenticação via cabeçalho Authorization: Bearer <api_key>'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

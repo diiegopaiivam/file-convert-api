@@ -3,27 +3,63 @@ name: Build and Push Docker Images
 on:
   workflow_run:
     workflows: ["CI / Fast Feedback", "Security Audit & Container Vulnerability Scan"]
-    types: [completed]
-    branches: [main]
-  push:
-    branches: [main]
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  actions: read
 
 jobs:
   build-and-push:
     name: Multi-Arch Build & Push to GHCR
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event.workflow_run.conclusion == 'success')
+    # Só executa na branch main nativa do repositório se o evento disparador tiver concluído com sucesso
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
 
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Verify CI and Security Prerequisite Status
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          echo "Verificando se os pipelines de CI e Segurança passaram para o commit ${COMMIT_SHA}..."
+
+          CI_CONCLUSION=$(gh run list --commit "$COMMIT_SHA" --workflow "CI / Fast Feedback" --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "")
+          SEC_CONCLUSION=$(gh run list --commit "$COMMIT_SHA" --workflow "Security Audit & Container Vulnerability Scan" --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "")
+
+          echo "Status CI / Fast Feedback: ${CI_CONCLUSION}"
+          echo "Status Security Scan: ${SEC_CONCLUSION}"
+
+          if [ "$CI_CONCLUSION" != "success" ] || [ "$SEC_CONCLUSION" != "success" ]; then
+            echo "::notice::Bloqueio de Pipeline: Nem todos os pré-requisitos (CI e Segurança) concluíram com sucesso ainda para este commit."
+            exit 1
+          fi
+
+          echo "Pré-requisitos CI e Segurança validados com sucesso! Prosseguindo com o build multi-arch."
 
       - name: Calculate Short Git SHA
         id: vars
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Downcase Repository Owner Name
+        id: repo_name
+        run: echo "owner_lowercase=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -37,10 +73,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Downcase Repository Owner Name
-        id: repo_name
-        run: echo "owner_lowercase=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Build and Push API Image (Multi-Arch)
         uses: docker/build-push-action@v5
